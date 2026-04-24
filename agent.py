@@ -15,13 +15,14 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 load_dotenv()
 
 # API keys
-FINNHUB_API_KEY   = os.getenv("FINNHUB_API_KEY")
-GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
-GMAIL_SENDER      = os.getenv("GMAIL_SENDER")
+FINNHUB_API_KEY    = os.getenv("FINNHUB_API_KEY")
+GROQ_API_KEY       = os.getenv("GROQ_API_KEY")
+CMC_API_KEY        = os.getenv("CMC_API_KEY")
+GMAIL_SENDER       = os.getenv("GMAIL_SENDER")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
-GMAIL_RECIPIENT   = os.getenv("GMAIL_RECIPIENT")
+GMAIL_RECIPIENT    = os.getenv("GMAIL_RECIPIENT")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID  = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
 client = Groq(api_key=GROQ_API_KEY)
 
@@ -54,50 +55,93 @@ def fetch_crypto_news():
 
 
 def fetch_fear_greed_index():
-    """Fetches the current Crypto Fear & Greed Index (free, no key needed)."""
-    print("😨 Fetching Fear & Greed Index...")
+    """Fetches the Fear & Greed Index using the official CoinMarketCap Pro API."""
+    print("😨 Fetching Fear & Greed Index (CMC Pro API)...")
     try:
-        r = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
-        data = r.json()["data"][0]
-        return {
-            "value": data["value"],
-            "label": data["value_classification"],
+        headers = {
+            "X-CMC_PRO_API_KEY": CMC_API_KEY,
+            "Accept": "application/json",
         }
+        r = requests.get(
+            "https://pro-api.coinmarketcap.com/v3/fear-and-greed/latest",
+            headers=headers,
+            timeout=10,
+        )
+        data = r.json()
+        fg = data["data"]
+        value = int(float(fg["value"]))
+        label = fg.get("value_classification", "Unknown").title()
+        return {"value": str(value), "label": label}
     except Exception as e:
-        print(f"  Could not fetch Fear & Greed: {e}")
-        return {"value": "N/A", "label": "Unknown"}
+        print(f"  CMC Pro API failed ({e}), falling back to alternative.me...")
+        try:
+            r = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
+            alt = r.json()["data"][0]
+            return {"value": alt["value"], "label": alt["value_classification"]}
+        except Exception as e2:
+            print(f"  Fallback also failed: {e2}")
+            return {"value": "N/A", "label": "Unknown"}
+
 
 
 def fetch_crypto_prices():
-    """Fetches live BTC and ETH prices from CoinGecko (free, no key needed)."""
-    print("💰 Fetching live crypto prices from CoinGecko...")
+    """Fetches live BTC and ETH prices from CoinMarketCap Pro API."""
+    print("💰 Fetching live crypto prices from CoinMarketCap...")
     try:
-        url = (
-            "https://api.coingecko.com/api/v3/simple/price"
-            "?ids=bitcoin,ethereum&vs_currencies=usd"
-            "&include_24hr_change=true&include_market_cap=true"
-        )
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        btc = data.get("bitcoin", {})
-        eth = data.get("ethereum", {})
-        return {
-            "BTC": {
-                "price":  f"${btc.get('usd', 'N/A'):,}",
-                "change": f"{btc.get('usd_24h_change', 0):.2f}%",
-                "mcap":   f"${btc.get('usd_market_cap', 0)/1e9:.1f}B",
-                "up":     btc.get('usd_24h_change', 0) >= 0,
-            },
-            "ETH": {
-                "price":  f"${eth.get('usd', 'N/A'):,}",
-                "change": f"{eth.get('usd_24h_change', 0):.2f}%",
-                "mcap":   f"${eth.get('usd_market_cap', 0)/1e9:.1f}B",
-                "up":     eth.get('usd_24h_change', 0) >= 0,
-            },
+        headers = {
+            "X-CMC_PRO_API_KEY": CMC_API_KEY,
+            "Accept": "application/json",
         }
+        r = requests.get(
+            "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+            "?symbol=BTC,ETH&convert=USD",
+            headers=headers,
+            timeout=10,
+        )
+        data = r.json()["data"]
+        result = {}
+        for symbol in ["BTC", "ETH"]:
+            coin  = data[symbol]
+            quote = coin["quote"]["USD"]
+            price  = quote.get("price", 0)
+            change = quote.get("percent_change_24h", 0)
+            mcap   = quote.get("market_cap", 0)
+            result[symbol] = {
+                "price":  f"${price:,.2f}",
+                "change": f"{change:.2f}%",
+                "mcap":   f"${mcap/1e9:.1f}B",
+                "up":     change >= 0,
+            }
+        return result
     except Exception as e:
-        print(f"  Could not fetch prices: {e}")
-        return {}
+        print(f"  CMC prices failed ({e}), falling back to CoinGecko...")
+        try:
+            url = (
+                "https://api.coingecko.com/api/v3/simple/price"
+                "?ids=bitcoin,ethereum&vs_currencies=usd"
+                "&include_24hr_change=true&include_market_cap=true"
+            )
+            r = requests.get(url, timeout=10)
+            d = r.json()
+            btc = d.get("bitcoin", {})
+            eth = d.get("ethereum", {})
+            return {
+                "BTC": {
+                    "price":  f"${btc.get('usd', 0):,.2f}",
+                    "change": f"{btc.get('usd_24h_change', 0):.2f}%",
+                    "mcap":   f"${btc.get('usd_market_cap', 0)/1e9:.1f}B",
+                    "up":     btc.get('usd_24h_change', 0) >= 0,
+                },
+                "ETH": {
+                    "price":  f"${eth.get('usd', 0):,.2f}",
+                    "change": f"{eth.get('usd_24h_change', 0):.2f}%",
+                    "mcap":   f"${eth.get('usd_market_cap', 0)/1e9:.1f}B",
+                    "up":     eth.get('usd_24h_change', 0) >= 0,
+                },
+            }
+        except Exception as e2:
+            print(f"  CoinGecko fallback also failed: {e2}")
+            return {}
 
 
 # ─────────────────────────────────────────────
