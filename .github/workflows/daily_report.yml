@@ -2,7 +2,7 @@ name: Daily Crypto Intelligence Report
 
 on:
   schedule:
-    - cron: '0 9 * * *' # Runs every day at 09:00 UTC
+    - cron: '0 */4 * * *' # Runs every 4 hours
   workflow_dispatch: # Allows manual trigger
 
 jobs:
