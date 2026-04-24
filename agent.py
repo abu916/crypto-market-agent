@@ -361,18 +361,21 @@ def build_html_email(events, fear_greed, prices):
 
 
 def send_email(events, fear_greed, prices):
-    """Sends the HTML intelligence report via Gmail."""
+    """Sends the HTML intelligence report via Gmail to one or more recipients."""
     if not all([GMAIL_SENDER, GMAIL_APP_PASSWORD, GMAIL_RECIPIENT]):
         print("\n  Skipping email: Missing Gmail credentials in .env")
         return
 
-    print("\n📧 Sending HTML email report...")
+    # Support multiple comma-separated recipients
+    recipients = [r.strip() for r in GMAIL_RECIPIENT.split(",") if r.strip()]
+
+    print(f"\n📧 Sending HTML email report to {len(recipients)} recipient(s)...")
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).strftime("%b %d %H:%M UTC")
 
     msg = MIMEMultipart("alternative")
     msg["From"]    = GMAIL_SENDER
-    msg["To"]      = GMAIL_RECIPIENT
+    msg["To"]      = ", ".join(recipients)   # shows all in the To: header
     msg["Subject"] = f"🔔 Crypto Intelligence Report — {now}"
 
     # Plain-text fallback
@@ -398,9 +401,10 @@ def send_email(events, fear_greed, prices):
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
         server.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
-        server.send_message(msg)
+        # Pass the list so every address actually receives it
+        server.sendmail(GMAIL_SENDER, recipients, msg.as_string())
         server.quit()
-        print(f"  ✅ HTML email sent to {GMAIL_RECIPIENT}")
+        print(f"  ✅ Email sent to: {', '.join(recipients)}")
     except Exception as e:
         print(f"  ❌ Email failed: {e}")
 
